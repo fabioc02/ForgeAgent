@@ -11,7 +11,6 @@ def _ensure_dir():
 
 
 def memory_save(key: str, value: str) -> str:
-    """Salva um valor na memoria persistente (JSON)."""
     try:
         _ensure_dir()
         safe_key = "".join(c if c.isalnum() or c in "-_" else "_" for c in key)
@@ -25,7 +24,6 @@ def memory_save(key: str, value: str) -> str:
 
 
 def memory_load(key: str) -> str:
-    """Carrega um valor da memoria."""
     try:
         _ensure_dir()
         safe_key = "".join(c if c.isalnum() or c in "-_" else "_" for c in key)
@@ -40,7 +38,6 @@ def memory_load(key: str) -> str:
 
 
 def memory_list() -> str:
-    """Lista todas as chaves na memoria."""
     try:
         _ensure_dir()
         keys = []
@@ -49,15 +46,12 @@ def memory_list() -> str:
                 keys.append(f[:-5])
         if not keys:
             return "Memoria vazia"
-        return "Chaves na memoria:
-" + "
-".join("- " + k for k in sorted(keys))
+        return "Chaves na memoria:\n" + "\n".join("- " + k for k in sorted(keys))
     except Exception as e:
         return "Erro: " + str(e)
 
 
 def memory_delete(key: str) -> str:
-    """Deleta uma chave da memoria."""
     try:
         _ensure_dir()
         safe_key = "".join(c if c.isalnum() or c in "-_" else "_" for c in key)

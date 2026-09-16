@@ -27,15 +27,14 @@ def terminal(command: str, cwd: str = ".", timeout: int = 30) -> str:
     base_cmd = cmd_parts[0]
     
     if base_cmd not in ALLOWED_COMMANDS:
-        return "Erro: comando nao permitido: " + base_cmd + ". Permitidos: " + ", ".join(ALLOWED_COMMANDS[:10]) + "..."
+        return "Erro: comando nao permitido: " + base_cmd
     
     for pattern in BLOCKED_PATTERNS:
         if pattern in command:
             return "Erro: padrao bloqueado no comando: " + pattern
     
-    if ".." in command and ("/" in command):
-        if "../" in command:
-            return "Erro: path traversal nao permitido"
+    if "../" in command:
+        return "Erro: path traversal nao permitido"
     
     try:
         work_dir = os.path.abspath(cwd)
@@ -43,30 +42,24 @@ def terminal(command: str, cwd: str = ".", timeout: int = 30) -> str:
             os.makedirs(work_dir, exist_ok=True)
         
         result = subprocess.run(
-            command,
+            ["bash", "-c", command],
             shell=False,
             cwd=work_dir,
             capture_output=True,
             text=True,
-            timeout=timeout,
-            executable="/bin/bash",
-            args=["bash", "-c", command]
+            timeout=timeout
         )
         
         output = ""
         if result.stdout:
             output += result.stdout
         if result.stderr:
-            output += "
-[STDERR]
-" + result.stderr
+            output += "\n[STDERR]\n" + result.stderr
         
-        output += "
-[Exit code: " + str(result.returncode) + "]"
+        output += "\n[Exit code: " + str(result.returncode) + "]"
         
         if len(output) > 10000:
-            output = output[:10000] + "
-... [truncado, " + str(len(output) - 10000) + " chars omitidos]"
+            output = output[:10000] + "\n... [truncado]"
         
         return output
     except subprocess.TimeoutExpired:

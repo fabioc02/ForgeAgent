@@ -15,7 +15,7 @@ Voce pode programar em:
 - Windows (PowerShell, batch, aplicacoes nativas)
 - Python, Node.js, e mais
 
-Voce tem acesso a ferramentas. Para usar uma ferramenta, responda com um bloco JSON:
+Voce tem acesso a ferramentas. Para usar uma ferramenta, responda com um bloco:
 
 [tool]
 {
@@ -32,6 +32,14 @@ Ferramentas disponiveis:
 - create_project: Cria um novo projeto. args: {"name": "nome", "language": "cpp"}
 - memory_save: Salva na memoria. args: {"key": "chave", "value": "valor"}
 - memory_load: Carrega da memoria. args: {"key": "chave"}
+- hexdump: Dump hexadecimal. args: {"path": "arquivo", "offset": 0, "length": 512}
+- analyze_binary: Analisa binario. args: {"path": "arquivo"}
+- find_patterns: Busca padrao hex. args: {"path": "arquivo", "pattern_hex": "4D5A"}
+- extract_strings: Extrai strings ASCII. args: {"path": "arquivo"}
+- compare_files: Compara dois arquivos. args: {"path1": "a", "path2": "b"}
+- entropy_analysis: Analise de entropia. args: {"path": "arquivo"}
+- parse_struct: Parseia struct C. args: {"path": "arquivo", "offset": 0, "format_str": "<IHH"}
+- search_signature: Busca assinatura. args: {"path": "arquivo", "signature": "CASM"}
 
 Quando terminar, responda normalmente sem bloco tool.
 
@@ -70,9 +78,7 @@ class Agent:
             print("[Agent] Sessao cancelada: " + session_id)
 
     def _parse_tool_call(self, text: str) -> Optional[Dict]:
-        pattern = r'\[tool\]\s*
-(.*?)
-\[/tool\]'
+        pattern = r'\[tool\]\s*\n(.*?)\n\[/tool\]'
         match = re.search(pattern, text, re.DOTALL)
         if match:
             try:
@@ -153,9 +159,7 @@ class Agent:
                         "args": args
                     })
                 
-                clean_response = re.sub(r'\[tool\]\s*
-.*?
-\[/tool\]', '', response, flags=re.DOTALL).strip()
+                clean_response = re.sub(r'\[tool\]\s*\n.*?\n\[/tool\]', '', response, flags=re.DOTALL).strip()
                 if clean_response:
                     session["messages"].append({
                         "role": "assistant",
@@ -174,10 +178,7 @@ class Agent:
                 
                 session["messages"].append({
                     "role": "user",
-                    "content": "Resultado da ferramenta " + action + ":
-" + result + "
-
-Continue ou responda ao usuario."
+                    "content": "Resultado da ferramenta " + action + ":\n" + result + "\n\nContinue ou responda ao usuario."
                 })
             else:
                 final_response = response.strip()

@@ -4,7 +4,6 @@ from typing import Optional
 
 
 def read_file(path: str) -> str:
-    """Le o conteudo de um arquivo."""
     try:
         path = os.path.abspath(path)
         if not os.path.exists(path):
@@ -16,9 +15,7 @@ def read_file(path: str) -> str:
         if size > 100000:
             with open(path, "r", errors="ignore") as f:
                 content = f.read(100000)
-            return content + "
-
-... [truncado, arquivo tem " + str(size) + " bytes]"
+            return content + "\n\n... [truncado, arquivo tem " + str(size) + " bytes]"
         
         with open(path, "r", errors="ignore") as f:
             return f.read()
@@ -27,7 +24,6 @@ def read_file(path: str) -> str:
 
 
 def write_file(path: str, content: str) -> str:
-    """Escreve conteudo em um arquivo (cria diretorios se necessario)."""
     try:
         path = os.path.abspath(path)
         os.makedirs(os.path.dirname(path), exist_ok=True)
@@ -39,7 +35,6 @@ def write_file(path: str, content: str) -> str:
 
 
 def append_file(path: str, content: str) -> str:
-    """Adiciona conteudo ao final de um arquivo."""
     try:
         path = os.path.abspath(path)
         os.makedirs(os.path.dirname(path), exist_ok=True)
@@ -51,7 +46,6 @@ def append_file(path: str, content: str) -> str:
 
 
 def list_directory(path: str = ".") -> str:
-    """Lista arquivos e diretorios."""
     try:
         path = os.path.abspath(path)
         if not os.path.exists(path):
@@ -69,15 +63,12 @@ def list_directory(path: str = ".") -> str:
         if not items:
             return "Diretorio vazio: " + path
         
-        return "Conteudo de " + path + ":
-" + "
-".join(items)
+        return "Conteudo de " + path + ":\n" + "\n".join(items)
     except Exception as e:
         return "Erro: " + str(e)
 
 
 def file_info(path: str) -> str:
-    """Retorna informacoes sobre um arquivo."""
     try:
         path = os.path.abspath(path)
         if not os.path.exists(path):
@@ -97,7 +88,6 @@ def file_info(path: str) -> str:
 
 
 def delete_file(path: str) -> str:
-    """Deleta um arquivo."""
     try:
         path = os.path.abspath(path)
         if not os.path.exists(path):
