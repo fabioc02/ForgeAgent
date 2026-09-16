@@ -1,0 +1,11 @@
+node_modules/
+dist/
+.venv/
+__pycache__/
+*.pyc
+.env
+.DS_Store
+*.log
+agent.lock
+current_session.json
+runtime_state.json

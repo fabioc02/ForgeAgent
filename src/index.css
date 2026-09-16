@@ -1,0 +1,26 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  font-family: 'JetBrains Mono', 'Fira Code', monospace;
+  color-scheme: dark;
+}
+
+body {
+  margin: 0;
+  background: #0a0a0a;
+  color: #e5e5e5;
+  min-height: 100vh;
+}
+
+* { box-sizing: border-box; }
+
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-track { background: #0a0a0a; }
+::-webkit-scrollbar-thumb { background: #333; border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: #555; }
+
+.terminal-font {
+  font-family: 'JetBrains Mono', 'Fira Code', monospace;
+}
