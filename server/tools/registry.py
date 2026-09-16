@@ -9,7 +9,7 @@ from server.tools.filesystem import (
 )
 from server.tools.memory import memory_save, memory_load, memory_list, memory_delete
 from server.tools.code_executor import compile_cpp, compile_java, run_executable, create_project
-from server.tools.git import git_status, git_commit, git_log, git_push
+from server.tools.git import git_status, git_clone, git_commit, git_log, git_push
 from server.tools.reverse_engineering import (
     hexdump, analyze_binary, find_patterns, extract_strings,
     compare_files, entropy_analysis, parse_struct, search_signature
@@ -35,6 +35,7 @@ def get_all_tools() -> dict:
         "run_executable": run_executable,
         "create_project": create_project,
         "git_status": git_status,
+        "git_clone": git_clone,
         "git_commit": git_commit,
         "git_log": git_log,
         "git_push": git_push,
@@ -67,6 +68,7 @@ def get_tools_info() -> list:
         {"name": "compile_java", "description": "Compila Java", "args": "source_path, output_dir"},
         {"name": "run_executable", "description": "Executa binario", "args": "path, args, timeout"},
         {"name": "create_project", "description": "Cria projeto (cpp/java/python/android)", "args": "name, language, base_dir"},
+        {"name": "git_clone", "description": "Clona repositorio GitHub", "args": "url, dest_path"},
         {"name": "git_status", "description": "Status git", "args": "repo_path"},
         {"name": "git_commit", "description": "Commit git", "args": "repo_path, message"},
         {"name": "git_log", "description": "Log git", "args": "repo_path, n"},

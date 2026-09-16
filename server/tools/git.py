@@ -51,3 +51,21 @@ def git_push(repo_path: str = ".", remote: str = "origin", branch: str = "main")
         return result.stdout + result.stderr
     except Exception as e:
         return "Erro: " + str(e)
+
+
+def git_clone(url: str, dest_path: str = ".") -> str:
+    """Clona repositorio do GitHub"""
+    import subprocess
+    try:
+        result = subprocess.run(
+            ["git", "clone", url, dest_path],
+            capture_output=True,
+            text=True,
+            timeout=120
+        )
+        if result.returncode == 0:
+            return "OK: repositorio clonado em " + dest_path
+        else:
+            return "Erro: " + result.stderr
+    except Exception as e:
+        return "Erro: " + str(e)
