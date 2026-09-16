@@ -184,8 +184,11 @@ async def run_agent(req: RunRequest):
 
 
 async def run_agent_async(session_id: str, message: str):
+    loop = asyncio.get_running_loop()
     def event_callback(event):
-        asyncio.create_task(broadcast_to_session(session_id, event))
+        asyncio.run_coroutine_threadsafe(
+            broadcast_to_session(session_id, event), loop
+        )
     
     try:
         loop = asyncio.get_event_loop()
