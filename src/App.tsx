@@ -45,6 +45,26 @@ function App() {
     api: false, bridge: false
   })
   const messagesEndRef = useRef<HTMLDivElement>(null)
+  const [temperature, setTemperature] = useState(0.1)
+  const [maxTokens, setMaxTokens] = useState(2048)
+
+  // Carregar config do localStorage
+  React.useEffect(() => {
+    const saved = localStorage.getItem('forge_config')
+    if (saved) {
+      try {
+        const cfg = JSON.parse(saved)
+        if (cfg.temperature !== undefined) setTemperature(cfg.temperature)
+        if (cfg.maxTokens !== undefined) setMaxTokens(cfg.maxTokens)
+      } catch(e) {}
+    }
+  }, [])
+  
+  // Salvar config quando mudar
+  React.useEffect(() => {
+    localStorage.setItem('forge_config', JSON.stringify({ temperature, maxTokens }))
+  }, [temperature, maxTokens])
+
   const wsRef = useRef<WebSocket | null>(null)
 
   useEffect(() => {
@@ -132,7 +152,7 @@ function App() {
       const res = await fetch('/api/agent/run', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: input, project_id: projects[0]?.id })
+        body: JSON.stringify({ message: input, project_id: projects[0]?.id, temperature, max_tokens: maxTokens })
       })
       if (!res.ok) {
         throw new Error('Backend offline (status ' + res.status + ')')
@@ -272,7 +292,7 @@ function App() {
                     msg.role === 'system' ? 'bg-red-500/10 text-red-200' :
                     'bg-neutral-800 text-neutral-200'
                   }`}>
-                    <pre className="whitespace-pre-wrap text-sm terminal-font">{msg.content}</pre>
+                    <pre className="whitespace-pre text-sm terminal-font overflow-x-auto max-w-full" style={{wordBreak: "break-word"}}>{msg.content}</pre>
                   </div>
                 </div>
               ))}
@@ -448,11 +468,11 @@ function App() {
               </div>
               <div>
                 <label className="text-sm text-neutral-400 block mb-1">Temperatura</label>
-                <input type="range" min="0" max="1" step="0.1" defaultValue="0.1" className="w-full" />
+                <input type="range" min="0" max="1" step="0.1" value={temperature} onChange={e => setTemperature(parseFloat(e.target.value))} className="w-full" /><span className="text-xs text-neutral-400 ml-2">{temperature}</span>
               </div>
               <div>
                 <label className="text-sm text-neutral-400 block mb-1">Max Tokens</label>
-                <input type="number" defaultValue="4096" className="w-full bg-neutral-900 border border-forge-border rounded px-3 py-2" />
+                <input type="number" value={maxTokens} onChange={e => setMaxTokens(parseInt(e.target.value) || 2048)} className="w-full bg-neutral-900 border border-forge-border rounded px-3 py-2" />
               </div>
             </div>
           </div>
