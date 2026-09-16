@@ -4,7 +4,46 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>ForgeAgent - AI Software Forge</title>
-  </head>
+  
+<style>
+  /* Scroll horizontal em QUALQUER bloco de código */
+  pre {
+    overflow-x: auto !important;
+    max-width: 100%;
+    white-space: pre-wrap !important;
+    word-wrap: break-word !important;
+  }
+  pre code {
+    display: block !important;
+    overflow-x: auto !important;
+    white-space: pre !important;
+    word-wrap: normal !important;
+    min-width: 0 !important;
+  }
+  
+  /* Scroll vertical na área de chat */
+  .chat-messages,
+  [class*="messages"],
+  [class*="chat"] {
+    overflow-y: auto !important;
+    max-height: calc(100vh - 220px) !important;
+  }
+  
+  /* Garantir que containers de mensagem não estourem */
+  .message-content,
+  [class*="message"] {
+    max-width: 100% !important;
+    overflow-wrap: break-word !important;
+    word-break: break-word !important;
+  }
+  
+  /* Forçar scroll na div principal de conteúdo */
+  main, .main-content, [class*="content"] {
+    overflow: auto !important;
+  }
+</style>
+
+</head>
   <body>
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
