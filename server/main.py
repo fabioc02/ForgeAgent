@@ -9,12 +9,10 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse, HTMLResponse
 from pydantic import BaseModel
 import uvicorn
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from server.hardware_detect import detect_hardware, get_model_for_mode
 from server.llm_provider import LLMProvider
@@ -46,9 +44,6 @@ class AppState:
                     "tasks_count": 0,
                     "path": pdir
                 }
-    
-    def save_project(self, project_id: str, data: Dict):
-        self.projects[project_id] = data
 
 
 state = AppState()
@@ -56,36 +51,39 @@ state = AppState()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    print("[ForgeAgent] Iniciando...")
+    print("[ForgeAgent] === INICIANDO ===", flush=True)
     
     state.hardware = detect_hardware()
-    print("[ForgeAgent] Hardware: " + json.dumps(state.hardware, indent=2))
+    print("[ForgeAgent] Hardware: " + json.dumps(state.hardware, indent=2), flush=True)
     
-    model_cfg = get_model_for_mode("auto")
-    print("[ForgeAgent] Modelo recomendado: " + model_cfg["model"])
+    # Usar apenas transformers (vLLM incompatível com Colab)
+    model_name = "Qwen/Qwen2.5-Coder-1.5B-Instruct"
+    backend = "transformers"
+    
+    print("[ForgeAgent] Modelo: " + model_name, flush=True)
+    print("[ForgeAgent] Backend: " + backend, flush=True)
     
     try:
-        state.llm = LLMProvider(
-            model_name=model_cfg["model"],
-            backend=model_cfg["backend"]
-        )
+        print("[ForgeAgent] Carregando modelo...", flush=True)
+        state.llm = LLMProvider(model_name=model_name, backend=backend)
         state.llm.initialize()
         
         tools = get_all_tools()
         state.agent = Agent(llm_provider=state.llm, tools=tools)
         state.initialized = True
-        print("[ForgeAgent] Agente inicializado com " + str(len(tools)) + " ferramentas")
+        print("[ForgeAgent] OK - " + str(len(tools)) + " ferramentas carregadas", flush=True)
     except Exception as e:
-        print("[ForgeAgent] ERRO ao inicializar: " + str(e))
-        print("[ForgeAgent] Agente ficara indisponivel")
+        print("[ForgeAgent] ERRO: " + str(e), flush=True)
+        import traceback
+        traceback.print_exc()
     
     state.load_projects()
-    print("[ForgeAgent] " + str(len(state.projects)) + " projetos carregados")
-    print("[ForgeAgent] Servidor pronto!")
+    print("[ForgeAgent] " + str(len(state.projects)) + " projetos carregados", flush=True)
+    print("[ForgeAgent] === PRONTO ===", flush=True)
     
     yield
     
-    print("[ForgeAgent] Encerrando...")
+    print("[ForgeAgent] Encerrando...", flush=True)
 
 
 app = FastAPI(title="ForgeAgent", lifespan=lifespan)
@@ -102,10 +100,6 @@ app.add_middleware(
 class RunRequest(BaseModel):
     message: str
     project_id: Optional[str] = None
-
-
-class CancelRequest(BaseModel):
-    pass
 
 
 class ProjectCreate(BaseModel):
@@ -201,7 +195,7 @@ async def run_agent_async(session_id: str, message: str):
         )
         state.sessions_meta[session_id]["status"] = "done"
     except Exception as e:
-        print("[Agent] Erro: " + str(e))
+        print("[Agent] Erro: " + str(e), flush=True)
         await broadcast_to_session(session_id, {
             "type": "agent_message",
             "content": "Erro: " + str(e)
@@ -237,19 +231,12 @@ async def list_sessions():
 
 @app.get("/api/github/status")
 async def github_status():
-    return {
-        "connected": False,
-        "repo": None,
-        "message": "GitHub nao configurado"
-    }
+    return {"connected": False, "repo": None, "message": "GitHub nao configurado"}
 
 
 @app.get("/api/bridge/status")
 async def bridge_status():
-    return {
-        "connected": False,
-        "message": "Bridge local (Colab)"
-    }
+    return {"connected": False, "message": "Bridge local (Colab)"}
 
 
 @app.post("/api/bridge/execute")
@@ -279,18 +266,19 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
         state.websocket_connections[session_id] = []
     state.websocket_connections[session_id].append(websocket)
     
-    print("[WS] Conectado: sessao " + session_id)
+    print("[WS] Conectado: sessao " + session_id, flush=True)
     
     try:
         while True:
             data = await websocket.receive_text()
     except WebSocketDisconnect:
         state.websocket_connections[session_id].remove(websocket)
-        print("[WS] Desconectado: sessao " + session_id)
+        print("[WS] Desconectado: sessao " + session_id, flush=True)
 
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", "8000"))
+    print("[Main] Iniciando servidor na porta " + str(port), flush=True)
     uvicorn.run(
         app,
         host="0.0.0.0",
