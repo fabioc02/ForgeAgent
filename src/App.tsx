@@ -61,7 +61,16 @@ function App() {
   const checkHealth = async () => {
     try {
       const res = await fetch('/api/health')
-      const data = await res.json()
+      if (!res.ok) {
+        setStatus({ api: false, bridge: false })
+        return
+      }
+      const text = await res.text()
+      if (!text || text.startsWith('<')) {
+        setStatus({ api: false, bridge: false })
+        return
+      }
+      const data = JSON.parse(text)
       setStatus({ api: true, bridge: data.bridge_connected || false })
       setRuntime(data.runtime || runtime)
     } catch {
@@ -125,12 +134,19 @@ function App() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ message: input, project_id: projects[0]?.id })
       })
-      const data = await res.json()
+      if (!res.ok) {
+        throw new Error('Backend offline (status ' + res.status + ')')
+      }
+      const text = await res.text()
+      if (!text || text.startsWith('<')) {
+        throw new Error('Backend retornou HTML em vez de JSON')
+      }
+      const data = JSON.parse(text)
       if (data.session_id) {
         setSessionId(data.session_id)
         connectWebSocket(data.session_id)
       }
-    } catch (err) {
+    } catch (err: any) {
       setMessages(prev => [...prev, {
         role: 'system',
         content: `Erro: ${err}`,
