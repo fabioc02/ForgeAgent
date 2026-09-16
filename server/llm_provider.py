@@ -20,9 +20,7 @@ class LLMProvider:
             raise ValueError("model_name nao especificado")
         print("[LLM] Iniciando " + self.model_name + " via " + self.backend)
         try:
-            if self.backend == "vllm" and torch.cuda.is_available():
-                self._init_vllm()
-            elif self.backend == "transformers":
+            if self.backend == "transformers":
                 self._init_transformers()
             else:
                 raise ValueError("Backend invalido: " + self.backend)
@@ -31,19 +29,6 @@ class LLMProvider:
             print("[LLM] ERRO: " + str(e))
             self.mode = "error"
             raise
-
-    def _init_vllm(self):
-        from vllm import LLM
-        self.llm = LLM(
-            model=self.model_name,
-            quantization="awq" if "7B" in self.model_name else None,
-            trust_remote_code=True,
-            gpu_memory_utilization=0.85,
-            max_model_len=4096,
-            dtype="float16"
-        )
-        self.mode = "gpu"
-        self.device = "cuda"
 
     def _init_transformers(self):
         from transformers import AutoModelForCausalLM, AutoTokenizer
@@ -55,7 +40,7 @@ class LLMProvider:
         self.llm = AutoModelForCausalLM.from_pretrained(
             self.model_name,
             device_map=device if device == "cuda" else {"": device},
-            torch_dtype=dtype,
+            dtype=dtype,
             trust_remote_code=True,
             low_cpu_mem_usage=True
         )
@@ -91,7 +76,7 @@ class LLMProvider:
                 max_tokens=max_tokens,
                 top_p=0.9
             )
-            outputs = self.llm.generate([prompt], params, use_tqdm=False)
+            outputs = self.llm.generate([prompt], params, use_qqdem=False)
             return outputs[0].outputs[0].text.strip()
         
         elif self.backend == "transformers":
