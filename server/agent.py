@@ -5,56 +5,33 @@ import uuid
 from typing import List, Dict, Any, Callable, Optional
 
 
-SYSTEM_PROMPT = """Voce e o ForgeAgent, um AGENTE AUTONOMO que EXECUTA tarefas de desenvolvimento de software.
+SYSTEM_PROMPT = """Voce e o ForgeAgent, um AGENTE AUTONOMO que EXECUTA tarefas de desenvolvimento.
 
-FORMATO DE FERRAMENTA (OBRIGATORIO):
+FORMATO DE FERRAMENTA:
 [tool]{"action": "nome", "args": {"param": "valor"}}[/tool]
 
-FLUXO OBRIGATORIO - VOCE DEVE COMPLETAR TODAS AS ETAPAS:
+FLUXO OBRIGATORIO (COMPLETE TODAS AS ETAPAS):
 1. create_project(name, language)
 2. write_file(path, content_COMPLETO)
 3. compile_cpp OU compile_java OU terminal("g++ ...")
-4. SE DER ERRO NA COMPILACAO: read_file -> corrigir codigo -> write_file -> RECOMPILAR
-5. run_executable(path, args="valores_teste")
-6. memory_save(key="projeto_X", value="descricao")
-7. Responder ao usuario com resumo FINAL
+4. SE ERRO: read_file -> corrigir -> write_file -> RECOMPILAR
+5. run_executable(path, args="teste")
+6. memory_save(key, value)
+7. Resposta final ao usuario
 
-REGRAS ABSOLUTAS:
-- NUNCA pare no meio do fluxo. Complete TODAS as 7 etapas.
-- Escreva codigo COMPLETO e funcional. Nunca esqueletos.
-- Se compilacao falhar, CORRIJA e RECOMPILAR. Repita ate funcionar.
-- SEMPRE teste o executavel com valores reais.
-- SEMPRE salve na memoria ao concluir.
-- Use UMA ferramenta por vez. Aguarde o resultado.
+REGRAS:
+- NUNCA pare antes de completar todas as 7 etapas
+- Escreva codigo COMPLETO, nunca esqueletos
+- Se compilacao falhar, CORRIJA e RECOMPILAR
+- SEMPRE teste com valores reais
+- SEMPRE salve na memoria
 
-EXEMPLO DE FLUXO COMPLETO:
-Usuario: "crie calculadora C++"
-Agente:
-[tool]{"action": "create_project", "args": {"name": "calc", "language": "cpp"}}[/tool]
-[tool]{"action": "write_file", "args": {"path": "Drive/projects/calc/main.cpp", "content": "#include <iostream>\\nint main(){...}"}}[/tool]
-[tool]{"action": "compile_cpp", "args": {"source_path": "Drive/projects/calc/main.cpp", "output_path": "Drive/projects/calc/calc"}}[/tool]
-[tool]{"action": "run_executable", "args": {"path": "Drive/projects/calc/calc", "args": "10 + 5"}}[/tool]
-[tool]{"action": "memory_save", "args": {"key": "projeto_calc", "value": "Calculadora C++ compilada e testada"}}[/tool]
-"Calculadora criada, compilada, testada e salva com sucesso!"
-
-FERRAMENTAS DISPONIVEIS:
-- terminal: Executa comandos bash. args: {"command": "ls -la"}
-- read_file: Le arquivo. args: {"path": "caminho"}
-- write_file: Escreve arquivo COMPLETO. args: {"path": "caminho", "content": "conteudo"}
-- append_file: Adiciona ao final. args: {"path": "caminho", "content": "texto"}
-- list_directory: Lista arquivos. args: {"path": "."}
-- file_info: Info do arquivo. args: {"path": "caminho"}
-- delete_file: Deleta arquivo/dir. args: {"path": "caminho"}
-- memory_save: Salva na memoria. args: {"key": "chave", "value": "valor"}
-- memory_load: Carrega da memoria. args: {"key": "chave"}
-- memory_list: Lista chaves. args: {}
-- memory_delete: Deleta da memoria. args: {"key": "chave"}
-- compile_cpp: Compila C/C++. args: {"source_path": "main.cpp", "output_path": "main"}
-- compile_java: Compila Java. args: {"source_path": "Main.java"}
-- run_executable: Executa binario. args: {"path": "./app", "args": "argumentos", "timeout": 30}
-- create_project: Cria projeto. args: {"name": "nome", "language": "cpp|java|python|android"}
-- git_status, git_commit, git_log, git_push, git_clone: Git
-- hexdump, analyze_binary, find_patterns, extract_strings, compare_files, entropy_analysis, parse_struct, search_signature: Engenharia reversa"""
+FERRAMENTAS:
+- terminal, read_file, write_file, append_file, list_directory, file_info, delete_file
+- memory_save, memory_load, memory_list, memory_delete
+- compile_cpp, compile_java, run_executable, create_project
+- git_status, git_commit, git_log, git_push, git_clone
+- hexdump, analyze_binary, find_patterns, extract_strings, compare_files, entropy_analysis, parse_struct, search_signature"""
 
 
 class Agent:
@@ -62,7 +39,7 @@ class Agent:
         self.llm = llm_provider
         self.tools = tools or {}
         self.sessions: Dict[str, Dict] = {}
-        self.max_iterations = 20  # Aumentado de 15 para 20
+        self.max_iterations = 25
 
     def create_session(self, project_id: str = None) -> str:
         session_id = str(uuid.uuid4())[:8]
@@ -71,7 +48,8 @@ class Agent:
             "project_id": project_id,
             "messages": [{"role": "system", "content": SYSTEM_PROMPT}],
             "status": "active",
-            "created_at": time.time()
+            "created_at": time.time(),
+            "last_tool": None
         }
         print("[Agent] Sessao criada: " + session_id, flush=True)
         return session_id
@@ -81,8 +59,7 @@ class Agent:
             self.sessions[session_id]["status"] = "cancelled"
 
     def _parse_tool_call(self, text: str) -> Optional[Dict]:
-        """Parse tool call - aceita formato inline e multi-linha"""
-        # Formato inline: [tool]{...}[/tool]
+        # Inline
         pattern_inline = r'\[tool\]\s*(\{.*?\})\s*\[/tool\]'
         match = re.search(pattern_inline, text, re.DOTALL)
         if match:
@@ -91,7 +68,7 @@ class Agent:
             except json.JSONDecodeError:
                 pass
         
-        # Formato multi-linha
+        # Multi-linha
         pattern_multiline = r'\[tool\]\s*\n(.*?)\n\s*\[/tool\]'
         match = re.search(pattern_multiline, text, re.DOTALL)
         if match:
@@ -99,14 +76,6 @@ class Agent:
                 return json.loads(match.group(1))
             except json.JSONDecodeError:
                 pass
-        
-        # JSON puro
-        try:
-            data = json.loads(text.strip())
-            if "action" in data:
-                return data
-        except json.JSONDecodeError:
-            pass
         
         return None
 
@@ -119,9 +88,22 @@ class Agent:
                 result = self.tools[action](**args)
                 return str(result)
             except Exception as e:
-                return "Erro na ferramenta " + action + ": " + str(e)
+                return "Erro: " + str(e)
         else:
             return "Ferramenta desconhecida: " + action
+
+    def _get_next_required_tool(self, last_tool: str) -> str:
+        """Retorna a próxima ferramenta obrigatória baseada na última"""
+        workflow = {
+            "create_project": "write_file",
+            "write_file": "compile_cpp",
+            "compile_cpp": "run_executable",
+            "compile_java": "run_executable",
+            "terminal": "run_executable",
+            "run_executable": "memory_save",
+            "memory_save": "DONE"
+        }
+        return workflow.get(last_tool, "DONE")
 
     def run(self, session_id: str, user_message: str, event_callback: Callable = None) -> str:
         if session_id not in self.sessions:
@@ -138,7 +120,6 @@ class Agent:
         
         final_response = ""
         tool_calls_count = 0
-        consecutive_empty = 0
         
         for iteration in range(self.max_iterations):
             if session["status"] == "cancelled":
@@ -147,7 +128,6 @@ class Agent:
             print(f"[Agent] Iteracao {iteration + 1}/{self.max_iterations}", flush=True)
             
             try:
-                # AUMENTADO: max_tokens de 2048 para 4096
                 response = self.llm.generate(
                     messages=session["messages"],
                     max_tokens=4096,
@@ -163,43 +143,52 @@ class Agent:
             
             if tool_call:
                 tool_calls_count += 1
-                consecutive_empty = 0
                 action = tool_call.get("action", "unknown")
                 args = tool_call.get("args", {})
-                print(f"[Agent] Tool call #{tool_calls_count}: {action}", flush=True)
+                session["last_tool"] = action
+                print(f"[Agent] Tool #{tool_calls_count}: {action}", flush=True)
                 
                 if event_callback:
                     event_callback({"type": "tool_call", "tool": action, "args": args})
                 
-                # Remover bloco tool da resposta
                 clean_response = re.sub(r'\[tool\].*?\[/tool\]', '', response, flags=re.DOTALL).strip()
                 if clean_response:
                     session["messages"].append({"role": "assistant", "content": clean_response})
                 
-                # Executar ferramenta
                 result = self._execute_tool(tool_call)
                 print(f"[Agent] Result: {result[:200]}", flush=True)
                 
                 if event_callback:
                     event_callback({"type": "tool_result", "tool": action, "result": result})
                 
-                # GATILHO: Forçar continuidade com instrução explícita
-                session["messages"].append({
-                    "role": "user",
-                    "content": f"Resultado de {action}: {result}\n\nCONTINUE O FLUXO. Proxima etapa obrigatoria."
-                })
-            else:
-                # Verificar se a resposta está vazia ou muito curta
-                if len(response.strip()) < 50:
-                    consecutive_empty += 1
-                    if consecutive_empty >= 2:
-                        # Forçar resposta final
-                        final_response = "Tarefa concluída. Executei " + str(tool_calls_count) + " ferramentas."
-                        break
+                # FORÇAR CONTINUIDADE: injeta próxima etapa obrigatória
+                next_tool = self._get_next_required_tool(action)
+                if next_tool != "DONE":
+                    session["messages"].append({
+                        "role": "user",
+                        "content": f"Resultado: {result}\n\nPROXIMA ETAPA OBRIGATORIA: {next_tool}. Execute agora."
+                    })
                 else:
-                    consecutive_empty = 0
+                    session["messages"].append({
+                        "role": "user",
+                        "content": f"Resultado: {result}\n\nFluxo completo. Responda ao usuario."
+                    })
+            else:
+                # Modelo não gerou tool call
+                # Verificar se já completou o fluxo
+                last_tool = session.get("last_tool")
+                next_required = self._get_next_required_tool(last_tool) if last_tool else "write_file"
                 
-                final_response = response.strip()
+                if next_required == "DONE":
+                    # Fluxo completo, resposta final válida
+                    final_response = response.strip()
+                else:
+                    # Modelo parou prematuramente - FORÇAR continuação
+                    force_msg = f"VOCE PAROU PREMATURAMENTE. A proxima etapa obrigatoria e: {next_required}\n\nExecute [tool]{{\"action\": \"{next_required}\", ...}}[/tool] AGORA."
+                    session["messages"].append({"role": "user", "content": force_msg})
+                    print(f"[Agent] Forçando continuacao: {next_required}", flush=True)
+                    continue  # Pula para próxima iteração
+                
                 session["messages"].append({"role": "assistant", "content": final_response})
                 
                 if event_callback:
@@ -208,7 +197,7 @@ class Agent:
                 break
         
         if not final_response:
-            final_response = f"Limite de iteracoes atingido. Executei {tool_calls_count} ferramentas."
+            final_response = f"Concluído. Executei {tool_calls_count} ferramentas."
             if event_callback:
                 event_callback({"type": "agent_message", "content": final_response})
         
