@@ -16,7 +16,7 @@ class LLMProvider:
             self.model_name = model_name
         if backend:
             self.backend = backend
-        print("[LLM] Iniciando via llama-cpp-python...", flush=True)
+        print("[LLM] Iniciando via lama-cpp-python...", flush=True)
         try:
             self._init_llama_cpp()
             print("[LLM] OK - Modo: " + self.mode, flush=True)
@@ -56,11 +56,8 @@ class LLMProvider:
         for msg in messages:
             role = msg.get("role", "user")
             content = msg.get("content", "")
-            prompt += "<|im_start|>" + role + "
-" + content + "<|im_end|>
-"
-        prompt += "<|im_start|>assistant
-"
+            prompt += "<|im_start|>" + role + "\n" + content + "<|im_end|>\n"
+        prompt += "<|im_start|>assistant\n"
         return prompt
 
     def generate(self, messages: List[Dict], max_tokens: int = 1024, temperature: float = 0.1) -> str:
