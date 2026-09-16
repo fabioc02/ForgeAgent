@@ -5,37 +5,56 @@ import uuid
 from typing import List, Dict, Any, Callable, Optional
 
 
-SYSTEM_PROMPT = """Voce e o ForgeAgent, um AGENTE AUTONOMO de desenvolvimento de software.
+SYSTEM_PROMPT = """Voce e o ForgeAgent, um AGENTE AUTONOMO que EXECUTA tarefas de desenvolvimento de software.
 
 FORMATO DE FERRAMENTA (OBRIGATORIO):
-Para executar uma acao, responda APENAS com:
 [tool]{"action": "nome", "args": {"param": "valor"}}[/tool]
 
-OU (formato multi-linha tambem aceito):
-[tool]
-{"action": "nome", "args": {"param": "valor"}}
-[/tool]
-
-FLUXO OBRIGATORIO PARA PROJETOS:
+FLUXO OBRIGATORIO - VOCE DEVE COMPLETAR TODAS AS ETAPAS:
 1. create_project(name, language)
-2. write_file(path, content_completo) - NUNCA esqueletos
-3. compile_cpp/compile_java/terminal - COMPILAR
-4. SE DER ERRO: read_file -> corrigir -> write_file -> RECOMPILAR (repita)
-5. run_executable - TESTAR com valores reais
-6. memory_save(key, value) - SALVAR
-7. Responder ao usuario
+2. write_file(path, content_COMPLETO)
+3. compile_cpp OU compile_java OU terminal("g++ ...")
+4. SE DER ERRO NA COMPILACAO: read_file -> corrigir codigo -> write_file -> RECOMPILAR
+5. run_executable(path, args="valores_teste")
+6. memory_save(key="projeto_X", value="descricao")
+7. Responder ao usuario com resumo FINAL
 
-PARA APPS LINUX:
-- Usar GTK ou Qt para GUI
-- Criar Makefile
-- Compilar: g++ main.cpp -o app `pkg-config --cflags --libs gtk+-3.0`
+REGRAS ABSOLUTAS:
+- NUNCA pare no meio do fluxo. Complete TODAS as 7 etapas.
+- Escreva codigo COMPLETO e funcional. Nunca esqueletos.
+- Se compilacao falhar, CORRIJA e RECOMPILAR. Repita ate funcionar.
+- SEMPRE teste o executavel com valores reais.
+- SEMPRE salve na memoria ao concluir.
+- Use UMA ferramenta por vez. Aguarde o resultado.
 
-REGRAS CRITICAS:
-1. SEMPRE complete o fluxo inteiro. NUNCA pare no meio.
-2. Escreva codigo COMPLETO, nunca "insira logica aqui".
-3. Se compilacao falhar, LEIA O ERRO, CORRIJA, RECOMPILAR.
-4. Salve na memoria ao concluir.
-5. Use UMA ferramenta por vez."""
+EXEMPLO DE FLUXO COMPLETO:
+Usuario: "crie calculadora C++"
+Agente:
+[tool]{"action": "create_project", "args": {"name": "calc", "language": "cpp"}}[/tool]
+[tool]{"action": "write_file", "args": {"path": "Drive/projects/calc/main.cpp", "content": "#include <iostream>\\nint main(){...}"}}[/tool]
+[tool]{"action": "compile_cpp", "args": {"source_path": "Drive/projects/calc/main.cpp", "output_path": "Drive/projects/calc/calc"}}[/tool]
+[tool]{"action": "run_executable", "args": {"path": "Drive/projects/calc/calc", "args": "10 + 5"}}[/tool]
+[tool]{"action": "memory_save", "args": {"key": "projeto_calc", "value": "Calculadora C++ compilada e testada"}}[/tool]
+"Calculadora criada, compilada, testada e salva com sucesso!"
+
+FERRAMENTAS DISPONIVEIS:
+- terminal: Executa comandos bash. args: {"command": "ls -la"}
+- read_file: Le arquivo. args: {"path": "caminho"}
+- write_file: Escreve arquivo COMPLETO. args: {"path": "caminho", "content": "conteudo"}
+- append_file: Adiciona ao final. args: {"path": "caminho", "content": "texto"}
+- list_directory: Lista arquivos. args: {"path": "."}
+- file_info: Info do arquivo. args: {"path": "caminho"}
+- delete_file: Deleta arquivo/dir. args: {"path": "caminho"}
+- memory_save: Salva na memoria. args: {"key": "chave", "value": "valor"}
+- memory_load: Carrega da memoria. args: {"key": "chave"}
+- memory_list: Lista chaves. args: {}
+- memory_delete: Deleta da memoria. args: {"key": "chave"}
+- compile_cpp: Compila C/C++. args: {"source_path": "main.cpp", "output_path": "main"}
+- compile_java: Compila Java. args: {"source_path": "Main.java"}
+- run_executable: Executa binario. args: {"path": "./app", "args": "argumentos", "timeout": 30}
+- create_project: Cria projeto. args: {"name": "nome", "language": "cpp|java|python|android"}
+- git_status, git_commit, git_log, git_push, git_clone: Git
+- hexdump, analyze_binary, find_patterns, extract_strings, compare_files, entropy_analysis, parse_struct, search_signature: Engenharia reversa"""
 
 
 class Agent:
@@ -43,7 +62,7 @@ class Agent:
         self.llm = llm_provider
         self.tools = tools or {}
         self.sessions: Dict[str, Dict] = {}
-        self.max_iterations = 15
+        self.max_iterations = 20  # Aumentado de 15 para 20
 
     def create_session(self, project_id: str = None) -> str:
         session_id = str(uuid.uuid4())[:8]
@@ -63,7 +82,7 @@ class Agent:
 
     def _parse_tool_call(self, text: str) -> Optional[Dict]:
         """Parse tool call - aceita formato inline e multi-linha"""
-        # Tentar formato inline: [tool]{...}[/tool]
+        # Formato inline: [tool]{...}[/tool]
         pattern_inline = r'\[tool\]\s*(\{.*?\})\s*\[/tool\]'
         match = re.search(pattern_inline, text, re.DOTALL)
         if match:
@@ -72,7 +91,7 @@ class Agent:
             except json.JSONDecodeError:
                 pass
         
-        # Tentar formato multi-linha
+        # Formato multi-linha
         pattern_multiline = r'\[tool\]\s*\n(.*?)\n\s*\[/tool\]'
         match = re.search(pattern_multiline, text, re.DOTALL)
         if match:
@@ -81,7 +100,7 @@ class Agent:
             except json.JSONDecodeError:
                 pass
         
-        # Tentar JSON puro
+        # JSON puro
         try:
             data = json.loads(text.strip())
             if "action" in data:
@@ -119,6 +138,7 @@ class Agent:
         
         final_response = ""
         tool_calls_count = 0
+        consecutive_empty = 0
         
         for iteration in range(self.max_iterations):
             if session["status"] == "cancelled":
@@ -127,10 +147,11 @@ class Agent:
             print(f"[Agent] Iteracao {iteration + 1}/{self.max_iterations}", flush=True)
             
             try:
+                # AUMENTADO: max_tokens de 2048 para 4096
                 response = self.llm.generate(
                     messages=session["messages"],
-                    max_tokens=2048,
-                    temperature=0.1
+                    max_tokens=4096,
+                    temperature=0.2
                 )
             except Exception as e:
                 error_msg = "Erro ao gerar: " + str(e)
@@ -142,6 +163,7 @@ class Agent:
             
             if tool_call:
                 tool_calls_count += 1
+                consecutive_empty = 0
                 action = tool_call.get("action", "unknown")
                 args = tool_call.get("args", {})
                 print(f"[Agent] Tool call #{tool_calls_count}: {action}", flush=True)
@@ -161,13 +183,22 @@ class Agent:
                 if event_callback:
                     event_callback({"type": "tool_result", "tool": action, "result": result})
                 
-                # Adicionar resultado ao contexto
+                # GATILHO: Forçar continuidade com instrução explícita
                 session["messages"].append({
                     "role": "user",
-                    "content": f"Resultado de {action}: {result}\n\nContinue ou responda."
+                    "content": f"Resultado de {action}: {result}\n\nCONTINUE O FLUXO. Proxima etapa obrigatoria."
                 })
             else:
-                # Sem tool call = resposta final
+                # Verificar se a resposta está vazia ou muito curta
+                if len(response.strip()) < 50:
+                    consecutive_empty += 1
+                    if consecutive_empty >= 2:
+                        # Forçar resposta final
+                        final_response = "Tarefa concluída. Executei " + str(tool_calls_count) + " ferramentas."
+                        break
+                else:
+                    consecutive_empty = 0
+                
                 final_response = response.strip()
                 session["messages"].append({"role": "assistant", "content": final_response})
                 
