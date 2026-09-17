@@ -4,7 +4,7 @@ from server.tools.memory import memory_save, memory_load, memory_list, memory_de
 from server.tools.compile import compile_cpp, compile_java, run_executable
 from server.tools.projects import create_project, list_projects, create_and_write, list_project_files
 from server.tools.git import git_status, git_commit, git_log, git_push, git_clone
-from server.tools.reverse import hexdump, analyze_binary, find_patterns, extract_strings, compare_files, entropy_analysis, parse_struct, search_signature
+from server.tools.reverse_engineering import hexdump, analyze_binary, find_patterns, extract_strings, compare_files, entropy_analysis, parse_struct, search_signature
 
 
 def get_all_tools():
