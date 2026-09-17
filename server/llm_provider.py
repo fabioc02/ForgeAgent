@@ -16,12 +16,12 @@ class LLMProvider:
             self.model_name = model_name
         if backend:
             self.backend = backend
-        print("[LLM] Iniciando via lama-cpp-python...", flush=True)
+        print("[LLM] Iniciando via llama-cpp-python...", flush=True)
         try:
             self._init_llama_cpp()
-            print("[LLM] OK - Modo: " + self.mode, flush=True)
+            print(f"[LLM] OK - Modo: {self.mode}", flush=True)
         except Exception as e:
-            print("[LLM] ERRO: " + str(e), flush=True)
+            print(f"[LLM] ERRO: {e}", flush=True)
             self.mode = "error"
             raise
 
@@ -35,7 +35,7 @@ class LLMProvider:
             repo_id="bartowski/DeepSeek-Coder-V2-Lite-Instruct-GGUF",
             filename="DeepSeek-Coder-V2-Lite-Instruct-Q4_K_M.gguf"
         )
-        print("[LLM] Modelo baixado: " + model_path, flush=True)
+        print(f"[LLM] Modelo baixado: {model_path}", flush=True)
         
         n_gpu_layers = -1 if torch.cuda.is_available() else 0
         
@@ -49,18 +49,18 @@ class LLMProvider:
         
         self.mode = "gpu" if torch.cuda.is_available() else "cpu"
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
-        print("[LLM] Carregado em " + self.mode, flush=True)
+        print(f"[LLM] Carregado em {self.mode} ({n_gpu_layers} camadas GPU)", flush=True)
 
     def _build_prompt(self, messages: List[Dict]) -> str:
         prompt = ""
         for msg in messages:
             role = msg.get("role", "user")
             content = msg.get("content", "")
-            prompt += "<|im_start|>" + role + "\n" + content + "<|im_end|>\n"
+            prompt += f"<|im_start|>{role}\n{content}<|im_end|>\n"
         prompt += "<|im_start|>assistant\n"
         return prompt
 
-    def generate(self, messages: List[Dict], max_tokens: int = 1024, temperature: float = 0.1) -> str:
+    def generate(self, messages: List[Dict], max_tokens: int = 4096, temperature: float = 0.2) -> str:
         if self.mode == "error":
             raise RuntimeError("LLM em estado de erro")
         prompt = self._build_prompt(messages)
@@ -76,7 +76,7 @@ class LLMProvider:
     def get_status(self) -> Dict:
         return {
             "mode": self.mode,
-            "model": self.model_name,
+            "model": self.model_name or "DeepSeek-Coder-V2-Lite",
             "backend": "llama-cpp",
             "device": self.device
         }

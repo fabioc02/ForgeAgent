@@ -76,7 +76,6 @@ class Agent:
             self.sessions[session_id]["status"] = "cancelled"
 
     def _parse_tool_call(self, text: str) -> Optional[Dict]:
-        # Inline
         pattern_inline = r'\[tool\]\s*(\{.*?\})\s*\[/tool\]'
         match = re.search(pattern_inline, text, re.DOTALL)
         if match:
@@ -85,7 +84,6 @@ class Agent:
             except json.JSONDecodeError:
                 pass
         
-        # Multi-linha
         pattern_multiline = r'\[tool\]\s*\n(.*?)\n\s*\[/tool\]'
         match = re.search(pattern_multiline, text, re.DOTALL)
         if match:
@@ -97,12 +95,8 @@ class Agent:
         return None
 
     def _clean_markdown_fences(self, content: str) -> str:
-        """Remove markdown fences do conteúdo"""
-        # Remove ```cpp, ```python, ```java, etc no início
         content = re.sub(r'^```[a-zA-Z]*\n', '', content)
-        # Remove ``` no final
         content = re.sub(r'\n```$', '', content)
-        # Remove ``` isolados
         content = content.replace('```', '')
         return content.strip()
 
@@ -110,11 +104,9 @@ class Agent:
         action = tool_call.get("action", "")
         args = tool_call.get("args", {})
         
-        # Limpar markdown fences do content se for write_file
         if action == "write_file" and "content" in args:
             args["content"] = self._clean_markdown_fences(args["content"])
         
-        # Corrigir nomes de parâmetros comuns
         if action == "compile_cpp":
             if "path" in args and "source_path" not in args:
                 args["source_path"] = args.pop("path")
@@ -124,8 +116,7 @@ class Agent:
                 result = self.tools[action](**args)
                 return str(result)
             except TypeError as e:
-                # Erro de parâmetro - retornar mensagem clara
-                return f"Erro de parâmetro: {str(e)}. Verifique os nomes: {list(self.tools[action].__code__.co_varnames)}"
+                return f"Erro de parâmetro: {str(e)}. Parametros: {list(self.tools[action].__code__.co_varnames)}"
             except Exception as e:
                 return "Erro: " + str(e)
         else:
@@ -199,21 +190,18 @@ class Agent:
                 if event_callback:
                     event_callback({"type": "tool_result", "tool": action, "result": result})
                 
-                # Detectar erros e forçar correção
                 if "Erro" in result or "erro" in result.lower():
                     session["error_count"] = session.get("error_count", 0) + 1
                     if session["error_count"] > 5:
                         final_response = f"Muitos erros ({session['error_count']}). Último: {result}"
                         break
                     
-                    # Forçar leitura e correção
                     session["messages"].append({
                         "role": "user",
                         "content": f"ERRO: {result}\n\nUse read_file para ver o código, corrija com write_file (SEM markdown fences), e recompile."
                     })
                 else:
                     session["error_count"] = 0
-                    # Continuar fluxo normal
                     next_tool = self._get_next_required_tool(action)
                     if next_tool != "DONE":
                         session["messages"].append({
@@ -226,7 +214,6 @@ class Agent:
                             "content": f"Resultado: {result}\n\nFluxo completo. Responda ao usuario."
                         })
             else:
-                # Modelo não gerou tool call
                 last_tool = session.get("last_tool")
                 next_required = self._get_next_required_tool(last_tool) if last_tool else "write_file"
                 

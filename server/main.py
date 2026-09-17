@@ -57,7 +57,7 @@ async def lifespan(app: FastAPI):
     print('[ForgeAgent] Hardware: ' + json.dumps(state.hardware, indent=2), flush=True)
     
     # Usar modelo 7B AWQ (4.5GB, perfeito para T4)
-    model_name = 'Qwen/Qwen2.5-Coder-7B-Instruct-GGUF'
+    model_name = 'bartowski/DeepSeek-Coder-V2-Lite-Instruct-GGUF'
     backend = 'transformers'
     
     print('[ForgeAgent] Modelo: ' + model_name, flush=True)
