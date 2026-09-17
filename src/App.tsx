@@ -462,8 +462,9 @@ function App() {
               <div>
                 <label className="text-sm text-neutral-400 block mb-1">Modelo LLM</label>
                 <select className="w-full bg-neutral-900 border border-forge-border rounded px-3 py-2">
-                  <option>Qwen/Qwen2.5-Coder-7B-Instruct (GPU)</option>
-                  <option>Qwen/Qwen2.5-Coder-1.5B-Instruct (CPU)</option>
+                  <option>DeepSeek-Coder-V2-Lite-Instruct (GPU) - 16B</option>
+                  <option>Qwen/Qwen2.5-Coder-7B-Instruct (GPU) - 7B</option>
+                  <option>Phi-3-mini (CPU) - 3.8B</option>
                 </select>
               </div>
               <div>
