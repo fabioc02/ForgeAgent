@@ -6,7 +6,7 @@ import google.generativeai as genai
 
 class LLMProvider:
     def __init__(self, model_name=None, backend="gemini"):
-        self.model_name = model_name or "gemini-2.0-flash"
+        self.model_name = model_name or "gemini-1.5-flash"
         self.backend = backend
         self.model = None
         self.mode = "uninitialized"
