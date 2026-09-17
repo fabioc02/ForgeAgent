@@ -5,6 +5,7 @@ import asyncio
 import threading
 from contextlib import asynccontextmanager
 from typing import Dict, List
+from collections import defaultdict
 
 from fastapi import FastAPI, HTTPException, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
@@ -20,10 +21,12 @@ class AppState:
         self.llm = None
         self.agent = None
         self.tools = None
-        self.sessions_meta = {}
 
 state = AppState()
-_ws_clients: Dict[str, List] = {}
+
+# Sistema de broadcast robusto com Queue
+_event_queue = asyncio.Queue()
+_ws_connections: Dict[str, List[WebSocket]] = defaultdict(list)
 
 class ChatRequest(BaseModel):
     message: str
@@ -31,9 +34,37 @@ class ChatRequest(BaseModel):
     temperature: float = 0.2
     max_tokens: int = 4096
 
+async def _broadcast_loop():
+    """Loop que consome eventos da fila e envia para WebSockets"""
+    while True:
+        try:
+            session_id, event = await _event_queue.get()
+            if session_id in _ws_connections:
+                disconnected = []
+                for ws in _ws_connections[session_id]:
+                    try:
+                        await ws.send_json(event)
+                    except:
+                        disconnected.append(ws)
+                for ws in disconnected:
+                    _ws_connections[session_id].remove(ws)
+        except Exception as e:
+            print(f"[Broadcast] Erro: {e}", flush=True)
+
+def _broadcast_event(session_id: str, event: Dict):
+    """Coloca evento na fila (thread-safe)"""
+    try:
+        _event_queue.put_nowait((session_id, event))
+    except:
+        pass
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     print("\n[ForgeAgent] === INICIANDO ===", flush=True)
+    
+    # Iniciar loop de broadcast
+    broadcast_task = asyncio.create_task(_broadcast_loop())
+    
     try:
         import torch
         gpu_info = {
@@ -68,7 +99,10 @@ async def lifespan(app: FastAPI):
     projects_count = len([d for d in os.listdir(projects_dir) if os.path.isdir(os.path.join(projects_dir, d))])
     print(f"[ForgeAgent] {projects_count} projetos carregados", flush=True)
     print("[ForgeAgent] === PRONTO ===\n", flush=True)
+    
     yield
+    
+    broadcast_task.cancel()
 
 app = FastAPI(title="ForgeAgent", lifespan=lifespan)
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
@@ -108,9 +142,18 @@ def run_agent(req: ChatRequest):
             state.agent.run(session_id=session_id, user_message=req.message, event_callback=lambda evt: _broadcast_event(session_id, evt))
         except Exception as e:
             print(f"[Agent] Erro: {e}", flush=True)
+            _broadcast_event(session_id, {"type": "error", "content": str(e)})
+            _broadcast_event(session_id, {"type": "done"})
     thread = threading.Thread(target=run, daemon=True)
     thread.start()
     return {"session_id": session_id}
+
+@app.post("/api/sessions/{session_id}/cancel")
+def cancel_session(session_id: str):
+    if state.agent and session_id in state.agent.sessions:
+        state.agent.cancel_session(session_id)
+        return {"status": "cancelled"}
+    raise HTTPException(status_code=404, detail="Sessao nao encontrada")
 
 @app.get("/api/tools")
 def get_tools():
@@ -120,27 +163,15 @@ def get_tools():
 async def ws_session(websocket: WebSocket, session_id: str):
     await websocket.accept()
     print(f"[WS] Conectado: sessao {session_id}", flush=True)
-    if session_id not in _ws_clients:
-        _ws_clients[session_id] = []
-    _ws_clients[session_id].append(websocket)
+    _ws_connections[session_id].append(websocket)
     try:
         while True:
             await websocket.receive_text()
     except:
         pass
     finally:
-        if session_id in _ws_clients:
-            _ws_clients[session_id] = [w for w in _ws_clients[session_id] if w != websocket]
-
-def _broadcast_event(session_id: str, event: Dict):
-    if session_id in _ws_clients:
-        for ws in _ws_clients[session_id]:
-            try:
-                loop = asyncio.get_event_loop()
-                if loop.is_running():
-                    asyncio.run_coroutine_threadsafe(ws.send_json(event), loop)
-            except:
-                pass
+        if websocket in _ws_connections[session_id]:
+            _ws_connections[session_id].remove(websocket)
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8000)
