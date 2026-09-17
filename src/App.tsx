@@ -462,8 +462,8 @@ function App() {
               <div>
                 <label className="text-sm text-neutral-400 block mb-1">Modelo LLM</label>
                 <select className="w-full bg-neutral-900 border border-forge-border rounded px-3 py-2">
-                  <option>Gemini 2.5 Flash (Cloud) - 1M tokens</option>
-                  <option>Gemini 2.5 Pro (Cloud) - 2M tokens</option>
+                  <option>Gemini 3.6 Flash (Cloud) - 1M tokens</option>
+                  <option>Gemini 3.6 Flash (Cloud) - 2M tokens</option>
                   <option>Gemini 3 Flash Preview (Cloud) - Experimental</option>
                 </select>
               </div>
