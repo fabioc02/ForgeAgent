@@ -78,32 +78,37 @@ class Agent:
             self.sessions[session_id]["status"] = "cancelled"
 
     def _parse_action(self, text):
-        # Tentar JSON puro
+        # Tentar JSON puro (compacto ou formatado)
         try:
             data = json.loads(text.strip())
             if "tool" in data:
                 return data
         except json.JSONDecodeError:
             pass
-        # Tentar JSON dentro de texto
-        match = re.search(r'\{\s*"tool"\s*:', text)
+        
+        # Tentar JSON dentro de bloco de código markdown
+        match = re.search(r'```(?:json)?\s*\n?(.*?)\n?```', text, re.DOTALL)
         if match:
-            start = match.start()
-            # Encontrar o fim do JSON
-            brace_count = 0
-            end = start
-            for i in range(start, len(text)):
-                if text[i] == '{':
-                    brace_count += 1
-                elif text[i] == '}':
-                    brace_count -= 1
-                    if brace_count == 0:
-                        end = i + 1
-                        break
             try:
-                return json.loads(text[start:end])
+                data = json.loads(match.group(1).strip())
+                if "tool" in data:
+                    return data
             except json.JSONDecodeError:
                 pass
+        
+        # Tentar JSON solto no texto (com quebras de linha)
+        match = re.search(r'\{[\s\S]*?"tool"[\s\S]*?:[\s\S]*?"\w+"[\s\S]*?\}', text)
+        if match:
+            json_str = match.group(0)
+            # Remover quebras de linha extras para facilitar parsing
+            json_str = re.sub(r'\n\s*\n', '\n', json_str)
+            try:
+                data = json.loads(json_str)
+                if "tool" in data:
+                    return data
+            except json.JSONDecodeError:
+                pass
+        
         return None
 
     def _execute_tool(self, action):
