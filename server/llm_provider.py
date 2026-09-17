@@ -1,82 +1,59 @@
 import os
-import sys
+import json
 from typing import List, Dict
+import google.generativeai as genai
 
 
 class LLMProvider:
-    def __init__(self, model_name: str = None, backend: str = "auto"):
-        self.model_name = model_name
+    def __init__(self, model_name=None, backend="gemini"):
+        self.model_name = model_name or "gemini-2.5-pro"
         self.backend = backend
-        self.llm = None
+        self.model = None
         self.mode = "uninitialized"
-        self.device = None
+        self.device = "cloud"
 
-    def initialize(self, model_name: str = None, backend: str = None):
+    def initialize(self, api_key=None, model_name=None):
         if model_name:
             self.model_name = model_name
-        if backend:
-            self.backend = backend
-        print("[LLM] Iniciando via llama-cpp-python...", flush=True)
-        try:
-            self._init_llama_cpp()
-            print(f"[LLM] OK - Modo: {self.mode}", flush=True)
-        except Exception as e:
-            print(f"[LLM] ERRO: {e}", flush=True)
-            self.mode = "error"
-            raise
+        if not api_key:
+            api_key = os.environ.get("GEMINI_API_KEY", "")
+        if not api_key:
+            raise ValueError("GEMINI_API_KEY nao configurada")
+        print("[LLM] Configurando Gemini 2.5 Pro...", flush=True)
+        genai.configure(api_key=api_key)
+        self.model = genai.GenerativeModel(self.model_name)
+        self.mode = "gpu"
+        print(f"[LLM] OK - Modelo: {self.model_name}", flush=True)
 
-    def _init_llama_cpp(self):
-        from llama_cpp import Llama
-        from huggingface_hub import hf_hub_download
-        import torch
-        
-        print("[LLM] Baixando modelo GGUF do HuggingFace...", flush=True)
-        model_path = hf_hub_download(
-            repo_id="bartowski/DeepSeek-Coder-V2-Lite-Instruct-GGUF",
-            filename="DeepSeek-Coder-V2-Lite-Instruct-Q4_K_M.gguf"
-        )
-        print(f"[LLM] Modelo baixado: {model_path}", flush=True)
-        
-        n_gpu_layers = -1 if torch.cuda.is_available() else 0
-        
-        self.llm = Llama(
-            model_path=model_path,
-            n_gpu_layers=n_gpu_layers,
-            n_ctx=4096,
-            n_batch=512,
-            verbose=False
-        )
-        
-        self.mode = "gpu" if torch.cuda.is_available() else "cpu"
-        self.device = "cuda" if torch.cuda.is_available() else "cpu"
-        print(f"[LLM] Carregado em {self.mode} ({n_gpu_layers} camadas GPU)", flush=True)
-
-    def _build_prompt(self, messages: List[Dict]) -> str:
-        prompt = ""
+    def generate(self, messages, max_tokens=8192, temperature=0.2):
+        if self.mode == "error":
+            raise RuntimeError("LLM em erro")
+        prompt_parts = []
         for msg in messages:
             role = msg.get("role", "user")
             content = msg.get("content", "")
-            prompt += f"<|im_start|>{role}\n{content}<|im_end|>\n"
-        prompt += "<|im_start|>assistant\n"
-        return prompt
-
-    def generate(self, messages: List[Dict], max_tokens: int = 4096, temperature: float = 0.2) -> str:
-        if self.mode == "error":
-            raise RuntimeError("LLM em estado de erro")
-        prompt = self._build_prompt(messages)
-        output = self.llm(
-            prompt,
-            max_tokens=max_tokens,
-            temperature=temperature,
-            top_p=0.9,
-            stop=["<|im_end|>"]
+            if role == "system":
+                prompt_parts.append(f"[SYSTEM]\n{content}")
+            elif role == "user":
+                prompt_parts.append(f"[USER]\n{content}")
+            elif role == "assistant":
+                prompt_parts.append(f"[ASSISTANT]\n{content}")
+            elif role == "tool":
+                prompt_parts.append(f"[TOOL_RESULT]\n{content}")
+        full_prompt = "\n\n".join(prompt_parts)
+        response = self.model.generate_content(
+            full_prompt,
+            generation_config=genai.GenerationConfig(
+                max_output_tokens=max_tokens,
+                temperature=temperature,
+            )
         )
-        return output["choices"][0]["text"].strip()
+        return response.text.strip()
 
-    def get_status(self) -> Dict:
+    def get_status(self):
         return {
             "mode": self.mode,
-            "model": self.model_name or "DeepSeek-Coder-V2-Lite",
-            "backend": "llama-cpp",
+            "model": self.model_name,
+            "backend": "gemini",
             "device": self.device
         }

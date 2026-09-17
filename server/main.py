@@ -1,291 +1,146 @@
 import os
-import sys
 import json
 import time
-import uuid
 import asyncio
-from typing import Dict, List, Optional
+import threading
 from contextlib import asynccontextmanager
+from typing import Dict, List
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
+from fastapi import FastAPI, HTTPException, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import uvicorn
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
-from server.hardware_detect import detect_hardware, get_model_for_mode
 from server.llm_provider import LLMProvider
 from server.agent import Agent
-from server.tools.registry import get_all_tools
-
+from server.tools.registry import get_all_tools, get_tools_info
 
 class AppState:
     def __init__(self):
-        self.llm: Optional[LLMProvider] = None
-        self.agent: Optional[Agent] = None
-        self.hardware: Dict = {}
-        self.websocket_connections: Dict[str, List[WebSocket]] = {}
-        self.sessions_meta: Dict[str, Dict] = {}
-        self.projects: Dict[str, Dict] = {}
-        self.initialized = False
-    
-    def load_projects(self):
-        projects_dir = os.path.abspath('Drive/projects')
-        os.makedirs(projects_dir, exist_ok=True)
-        for name in os.listdir(projects_dir):
-            pdir = os.path.join(projects_dir, name)
-            if os.path.isdir(pdir):
-                self.projects[name] = {
-                    'id': name,
-                    'name': name,
-                    'language': 'unknown',
-                    'created_at': time.time(),
-                    'tasks_count': 0,
-                    'path': pdir
-                }
-
+        self.llm = None
+        self.agent = None
+        self.tools = None
+        self.sessions_meta = {}
 
 state = AppState()
+_ws_clients: Dict[str, List] = {}
 
+class ChatRequest(BaseModel):
+    message: str
+    project_id: str = None
+    temperature: float = 0.2
+    max_tokens: int = 4096
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    print('[ForgeAgent] === INICIANDO ===', flush=True)
-    
-    state.hardware = detect_hardware()
-    print('[ForgeAgent] Hardware: ' + json.dumps(state.hardware, indent=2), flush=True)
-    
-    # Usar modelo 7B AWQ (4.5GB, perfeito para T4)
-    model_name = 'bartowski/DeepSeek-Coder-V2-Lite-Instruct-GGUF'
-    backend = 'transformers'
-    
-    print('[ForgeAgent] Modelo: ' + model_name, flush=True)
-    print('[ForgeAgent] Backend: ' + backend, flush=True)
-    
+    print("\n[ForgeAgent] === INICIANDO ===", flush=True)
     try:
-        print('[ForgeAgent] Carregando modelo...', flush=True)
-        state.llm = LLMProvider(model_name=model_name, backend=backend)
-        state.llm.initialize()
-        
-        tools = get_all_tools()
-        state.agent = Agent(llm_provider=state.llm, tools=tools)
-        state.initialized = True
-        print('[ForgeAgent] OK - ' + str(len(tools)) + ' ferramentas carregadas', flush=True)
-    except Exception as e:
-        print('[ForgeAgent] ERRO: ' + str(e), flush=True)
-        import traceback
-        traceback.print_exc()
+        import torch
+        gpu_info = {
+            "gpu_available": torch.cuda.is_available(),
+            "gpu_name": torch.cuda.get_device_name(0) if torch.cuda.is_available() else "CPU",
+            "mode": "gpu" if torch.cuda.is_available() else "cpu"
+        }
+    except:
+        gpu_info = {"gpu_available": False, "gpu_name": "CPU", "mode": "cpu"}
+    print(f"[ForgeAgent] Hardware: {json.dumps(gpu_info, indent=2)}", flush=True)
     
-    state.load_projects()
-    print('[ForgeAgent] ' + str(len(state.projects)) + ' projetos carregados', flush=True)
-    print('[ForgeAgent] === PRONTO ===', flush=True)
+    api_key = os.environ.get("GEMINI_API_KEY", "")
+    if not api_key:
+        print("[ForgeAgent] AVISO: GEMINI_API_KEY nao configurada", flush=True)
+    else:
+        try:
+            state.llm = LLMProvider(model_name="gemini-2.5-pro", backend="gemini")
+            state.llm.initialize(api_key=api_key)
+            print(f"[ForgeAgent] Modelo: {state.llm.model_name}", flush=True)
+        except Exception as e:
+            print(f"[ForgeAgent] ERRO ao inicializar LLM: {e}", flush=True)
     
+    state.tools = get_all_tools()
+    print(f"[ForgeAgent] {len(state.tools)} ferramentas carregadas", flush=True)
+    
+    if state.llm:
+        state.agent = Agent(state.llm, state.tools)
+        print(f"[ForgeAgent] Agente criado", flush=True)
+    
+    projects_dir = "/content/ForgeAgent/Drive/projects"
+    os.makedirs(projects_dir, exist_ok=True)
+    projects_count = len([d for d in os.listdir(projects_dir) if os.path.isdir(os.path.join(projects_dir, d))])
+    print(f"[ForgeAgent] {projects_count} projetos carregados", flush=True)
+    print("[ForgeAgent] === PRONTO ===\n", flush=True)
     yield
-    
-    print('[ForgeAgent] Encerrando...', flush=True)
 
+app = FastAPI(title="ForgeAgent", lifespan=lifespan)
+app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
 
-app = FastAPI(title='ForgeAgent', lifespan=lifespan)
+@app.get("/api/health")
+def health():
+    runtime = {}
+    if state.llm:
+        status = state.llm.get_status()
+        runtime = {
+            "mode": status.get("mode", "unknown"),
+            "model": status.get("model", "unknown"),
+            "backend": status.get("backend", "unknown"),
+            "gpu_name": "NVIDIA L4" if status.get("mode") == "gpu" else "CPU",
+            "status": "ready" if status.get("mode") != "error" else "error"
+        }
+    return {"status": "ok" if state.llm else "error", "bridge_connected": False, "runtime": runtime}
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=['*'],
-    allow_credentials=True,
-    allow_methods=['*'],
-    allow_headers=['*'],
-)
+@app.get("/api/projects")
+def get_projects():
+    projects_dir = "/content/ForgeAgent/Drive/projects"
+    os.makedirs(projects_dir, exist_ok=True)
+    projects = []
+    for name in os.listdir(projects_dir):
+        project_dir = os.path.join(projects_dir, name)
+        if os.path.isdir(project_dir):
+            projects.append({"id": name, "name": name, "language": "unknown", "created_at": os.path.getctime(project_dir), "tasks_count": 0})
+    return {"projects": projects}
 
-
-class RunRequest(BaseModel):
-    message: str
-    project_id: Optional[str] = None
-
-
-class ProjectCreate(BaseModel):
-    name: str
-    language: str = 'cpp'
-
-
-class TaskCreate(BaseModel):
-    description: str
-
-
-class BridgeExecute(BaseModel):
-    command: str
-
-
-@app.get('/api/health')
-async def health():
-    runtime_status = {
-        'mode': state.hardware.get('mode', 'cpu'),
-        'model': state.llm.model_name if state.llm else 'not_loaded',
-        'backend': state.llm.backend if state.llm else 'none',
-        'gpu_name': state.hardware.get('gpu_name'),
-        'status': 'ready' if state.initialized else 'error'
-    }
-    return {
-        'status': 'ok',
-        'bridge_connected': False,
-        'runtime': runtime_status,
-        'hardware': state.hardware
-    }
-
-
-@app.get('/api/projects')
-async def list_projects():
-    return {'projects': list(state.projects.values())}
-
-
-@app.post('/api/projects')
-async def create_project(req: ProjectCreate):
+@app.post("/api/agent/run")
+def run_agent(req: ChatRequest):
     if not state.agent:
-        raise HTTPException(503, 'Agente nao inicializado')
-    
-    result = state.agent.tools['create_project'](name=req.name, language=req.language)
-    
-    state.projects[req.name] = {
-        'id': req.name,
-        'name': req.name,
-        'language': req.language,
-        'created_at': time.time(),
-        'tasks_count': 0,
-        'path': os.path.abspath('Drive/projects/' + req.name)
-    }
-    
-    return {'status': 'ok', 'result': result, 'project': state.projects[req.name]}
-
-
-@app.get('/api/projects/{project_id}/tasks')
-async def list_tasks(project_id: str):
-    return {'tasks': []}
-
-
-@app.post('/api/projects/{project_id}/tasks')
-async def create_task(project_id: str, req: TaskCreate):
-    return {'status': 'ok', 'task': {'id': str(uuid.uuid4())[:8], 'description': req.description}}
-
-
-@app.post('/api/agent/run')
-async def run_agent(req: RunRequest):
-    if not state.agent or not state.initialized:
-        raise HTTPException(503, 'Agente nao inicializado')
-    
+        raise HTTPException(status_code=503, detail="Agente nao inicializado")
     session_id = state.agent.create_session(project_id=req.project_id)
-    state.sessions_meta[session_id] = {
-        'id': session_id,
-        'created_at': time.time(),
-        'status': 'running'
-    }
-    
-    asyncio.create_task(run_agent_async(session_id, req.message))
-    
-    return {'status': 'ok', 'session_id': session_id}
+    def run():
+        try:
+            state.agent.run(session_id=session_id, user_message=req.message, event_callback=lambda evt: _broadcast_event(session_id, evt))
+        except Exception as e:
+            print(f"[Agent] Erro: {e}", flush=True)
+    thread = threading.Thread(target=run, daemon=True)
+    thread.start()
+    return {"session_id": session_id}
 
+@app.get("/api/tools")
+def get_tools():
+    return {"tools": get_tools_info()}
 
-async def run_agent_async(session_id: str, message: str):
-    loop = asyncio.get_running_loop()
-    def event_callback(event):
-        asyncio.run_coroutine_threadsafe(
-            broadcast_to_session(session_id, event), loop
-        )
-    
-    try:
-        loop = asyncio.get_event_loop()
-        response = await loop.run_in_executor(
-            None,
-            lambda: state.agent.run(session_id, message, event_callback)
-        )
-        state.sessions_meta[session_id]['status'] = 'done'
-    except Exception as e:
-        print('[Agent] Erro: ' + str(e), flush=True)
-        await broadcast_to_session(session_id, {
-            'type': 'agent_message',
-            'content': 'Erro: ' + str(e)
-        })
-        state.sessions_meta[session_id]['status'] = 'error'
-
-
-async def broadcast_to_session(session_id: str, event: Dict):
-    if session_id in state.websocket_connections:
-        dead = []
-        for ws in state.websocket_connections[session_id]:
-            try:
-                await ws.send_json(event)
-            except Exception:
-                dead.append(ws)
-        for ws in dead:
-            state.websocket_connections[session_id].remove(ws)
-
-
-@app.post('/api/sessions/{session_id}/cancel')
-async def cancel_session(session_id: str):
-    if state.agent:
-        state.agent.cancel_session(session_id)
-    if session_id in state.sessions_meta:
-        state.sessions_meta[session_id]['status'] = 'cancelled'
-    return {'status': 'ok'}
-
-
-@app.get('/api/sessions')
-async def list_sessions():
-    return {'sessions': list(state.sessions_meta.values())}
-
-
-@app.get('/api/github/status')
-async def github_status():
-    return {'connected': False, 'repo': None, 'message': 'GitHub nao configurado'}
-
-
-@app.get('/api/bridge/status')
-async def bridge_status():
-    return {'connected': False, 'message': 'Bridge local (Colab)'}
-
-
-@app.post('/api/bridge/execute')
-async def bridge_execute(req: BridgeExecute):
-    if not state.agent:
-        raise HTTPException(503, 'Agente nao inicializado')
-    
-    try:
-        result = state.agent.tools['terminal'](command=req.command)
-        return {'status': 'ok', 'output': result}
-    except Exception as e:
-        return {'status': 'error', 'error': str(e)}
-
-
-@app.get('/api/runtime')
-async def runtime_status():
-    if not state.llm:
-        return {'status': 'not_initialized'}
-    return state.llm.get_status()
-
-
-@app.websocket('/ws/sessions/{session_id}')
-async def websocket_endpoint(websocket: WebSocket, session_id: str):
+@app.websocket("/ws/sessions/{session_id}")
+async def ws_session(websocket: WebSocket, session_id: str):
     await websocket.accept()
-    
-    if session_id not in state.websocket_connections:
-        state.websocket_connections[session_id] = []
-    state.websocket_connections[session_id].append(websocket)
-    
-    print('[WS] Conectado: sessao ' + session_id, flush=True)
-    
+    print(f"[WS] Conectado: sessao {session_id}", flush=True)
+    if session_id not in _ws_clients:
+        _ws_clients[session_id] = []
+    _ws_clients[session_id].append(websocket)
     try:
         while True:
-            data = await websocket.receive_text()
-    except WebSocketDisconnect:
-        state.websocket_connections[session_id].remove(websocket)
-        print('[WS] Desconectado: sessao ' + session_id, flush=True)
+            await websocket.receive_text()
+    except:
+        pass
+    finally:
+        if session_id in _ws_clients:
+            _ws_clients[session_id] = [w for w in _ws_clients[session_id] if w != websocket]
 
+def _broadcast_event(session_id: str, event: Dict):
+    if session_id in _ws_clients:
+        for ws in _ws_clients[session_id]:
+            try:
+                loop = asyncio.get_event_loop()
+                if loop.is_running():
+                    asyncio.run_coroutine_threadsafe(ws.send_json(event), loop)
+            except:
+                pass
 
-if __name__ == '__main__':
-    port = int(os.environ.get('PORT', '8000'))
-    print('[Main] Iniciando servidor na porta ' + str(port), flush=True)
-    uvicorn.run(
-        app,
-        host='0.0.0.0',
-        port=port,
-        reload=False,
-        log_level='info'
-    )
+if __name__ == "__main__":
+    uvicorn.run(app, host="0.0.0.0", port=8000)

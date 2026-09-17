@@ -1,64 +1,40 @@
 import os
 import json
-from typing import Optional
 
+MEMORY_DIR = "/content/ForgeAgent/Drive/memory"
 
-MEMORY_DIR = os.path.abspath("Drive/memory")
-
-
-def _ensure_dir():
+def memory_save(key, value):
     os.makedirs(MEMORY_DIR, exist_ok=True)
-
-
-def memory_save(key: str, value: str) -> str:
+    file_path = os.path.join(MEMORY_DIR, f"{key}.json")
     try:
-        _ensure_dir()
-        safe_key = "".join(c if c.isalnum() or c in "-_" else "_" for c in key)
-        path = os.path.join(MEMORY_DIR, safe_key + ".json")
         data = {"key": key, "value": value}
-        with open(path, "w") as f:
-            json.dump(data, f, indent=2)
-        return "OK: salvo '" + key + "' em " + path
+        with open(file_path, 'w', encoding='utf-8') as f:
+            json.dump(data, f, indent=2, ensure_ascii=False)
+        return f"OK: salvo '{key}' em {file_path}"
     except Exception as e:
-        return "Erro: " + str(e)
+        return f"Erro ao salvar: {str(e)}"
 
-
-def memory_load(key: str) -> str:
+def memory_load(key):
+    file_path = os.path.join(MEMORY_DIR, f"{key}.json")
+    if not os.path.exists(file_path):
+        return f"Erro: chave '{key}' nao encontrada"
     try:
-        _ensure_dir()
-        safe_key = "".join(c if c.isalnum() or c in "-_" else "_" for c in key)
-        path = os.path.join(MEMORY_DIR, safe_key + ".json")
-        if not os.path.exists(path):
-            return "Erro: chave nao encontrada: " + key
-        with open(path, "r") as f:
+        with open(file_path, 'r', encoding='utf-8') as f:
             data = json.load(f)
         return data.get("value", "")
     except Exception as e:
-        return "Erro: " + str(e)
+        return f"Erro ao carregar: {str(e)}"
 
-
-def memory_list() -> str:
+def memory_list():
+    os.makedirs(MEMORY_DIR, exist_ok=True)
     try:
-        _ensure_dir()
         keys = []
         for f in os.listdir(MEMORY_DIR):
-            if f.endswith(".json"):
+            if f.endswith('.json'):
                 keys.append(f[:-5])
-        if not keys:
+        if keys:
+            return "Chaves salvas:\n" + "\n".join(f"  - {k}" for k in sorted(keys))
+        else:
             return "Memoria vazia"
-        return "Chaves na memoria:\n" + "\n".join("- " + k for k in sorted(keys))
     except Exception as e:
-        return "Erro: " + str(e)
-
-
-def memory_delete(key: str) -> str:
-    try:
-        _ensure_dir()
-        safe_key = "".join(c if c.isalnum() or c in "-_" else "_" for c in key)
-        path = os.path.join(MEMORY_DIR, safe_key + ".json")
-        if os.path.exists(path):
-            os.remove(path)
-            return "OK: chave deletada: " + key
-        return "Erro: chave nao existe: " + key
-    except Exception as e:
-        return "Erro: " + str(e)
+        return f"Erro: {str(e)}"
