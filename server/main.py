@@ -50,7 +50,7 @@ async def lifespan(app: FastAPI):
         print("[ForgeAgent] AVISO: GEMINI_API_KEY nao configurada", flush=True)
     else:
         try:
-            state.llm = LLMProvider(model_name="gemini-1.5-flash-latest", backend="gemini")
+            state.llm = LLMProvider(model_name="gemini-2.5-flash", backend="gemini")
             state.llm.initialize(api_key=api_key)
             print(f"[ForgeAgent] Modelo: {state.llm.model_name}", flush=True)
         except Exception as e:

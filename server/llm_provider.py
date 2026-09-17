@@ -7,7 +7,7 @@ from google.genai import types
 
 class LLMProvider:
     def __init__(self, model_name=None, backend="gemini"):
-        self.model_name = model_name or "gemini-1.5-flash-latest"
+        self.model_name = model_name or "gemini-2.5-flash"
         self.backend = backend
         self.client = None
         self.mode = "uninitialized"
