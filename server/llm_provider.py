@@ -32,8 +32,8 @@ class LLMProvider:
         
         print("[LLM] Baixando modelo GGUF do HuggingFace...", flush=True)
         model_path = hf_hub_download(
-            repo_id="Qwen/Qwen2.5-Coder-7B-Instruct-GGUF",
-            filename="qwen2.5-coder-7b-instruct-q4_k_m.gguf"
+            repo_id="unsloth/DeepSeek-Coder-V2-Lite-Instruct-GGUF",
+            filename="DeepSeek-Coder-V2-Lite-Instruct-Q4_K_M.gguf"
         )
         print("[LLM] Modelo baixado: " + model_path, flush=True)
         
