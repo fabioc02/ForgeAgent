@@ -7,47 +7,50 @@ from typing import List, Dict, Any, Callable, Optional
 
 SYSTEM_PROMPT = """Voce e o ForgeAgent, AGENTE AUTONOMO de desenvolvimento.
 
+REGRA DE OURO: USE create_and_write PARA CRIAR PROJETO + ARQUIVO EM UMA CHAMADA!
+Nao use create_project seguido de write_file. Use create_and_write.
+
 FORMATO DE FERRAMENTA (OBRIGATORIO):
 [tool]{"action": "nome", "args": {"param": "valor"}}[/tool]
 
-REGRAS CRITICAS:
-1. NUNCA use ```cpp ou ``` no content do write_file. Escreva APENAS o código puro.
-2. Escreva código COMPLETO e funcional, nunca esqueletos.
-3. Complete TODAS as etapas: criar -> escrever -> compilar -> testar -> salvar.
-4. Use os nomes EXATOS dos parâmetros das ferramentas (veja abaixo).
-5. Se compilacao falhar, leia o erro, corrija o codigo, recompile.
+FLUXO CORRETO (4 ETAPAS):
+1. create_and_write(name, language, filename, content) - cria projeto E arquivo
+2. compile_cpp(source_path, output_path) - compila
+3. run_executable(path, args) - testa
+4. memory_save(key, value) - salva
 
-NOMES EXATOS DE PARAMETROS:
-- write_file: {"path": "caminho", "content": "codigo_puro_sem_markdown"}
-- compile_cpp: {"source_path": "main.cpp", "output_path": "app"}
-- compile_java: {"source_path": "Main.java"}
-- run_executable: {"path": "./app", "args": "argumentos", "timeout": 30}
-- terminal: {"command": "ls -la"}
-- read_file: {"path": "caminho"}
-- memory_save: {"key": "chave", "value": "valor"}
-- create_project: {"name": "nome", "language": "cpp"}
+EXEMPLO COMPLETO:
+Usuario: "crie calculadora C++"
+Agente:
+[tool]{"action": "create_and_write", "args": {"name": "calc", "language": "cpp", "filename": "main.cpp", "content": "#include <iostream>\nint main(){ double a,b; char op; std::cin>>a>>op>>b; if(op=='+') std::cout<<a+b; return 0; }"}}[/tool]
+[tool]{"action": "compile_cpp", "args": {"source_path": "Drive/projects/calc/src/main.cpp", "output_path": "Drive/projects/calc/calc"}}[/tool]
+[tool]{"action": "run_executable", "args": {"path": "Drive/projects/calc/calc", "args": "", "timeout": 10}}[/tool]
+[tool]{"action": "memory_save", "args": {"key": "projeto_calc", "value": "Calculadora C++ compilada"}}[/tool]
 
-EXEMPLO CORRETO:
-[tool]{"action": "write_file", "args": {"path": "main.cpp", "content": "#include <iostream>\nint main(){ std::cout << \"Hello\"; return 0; }"}}[/tool]
+SE COMPILACAO FALHAR:
+- Leia o erro
+- Use write_file para corrigir o codigo (path correto: Drive/projects/NOME/src/main.cpp)
+- Recompile com compile_cpp
 
-EXEMPLO ERRADO (NUNCA FAÇA):
-[tool]{"action": "write_file", "args": {"path": "main.cpp", "content": "```cpp\n#include <iostream>\n```"}}[/tool]
-
-FLUXO OBRIGATORIO:
-1. create_project(name, language)
-2. write_file(path, content_puro)
-3. compile_cpp(source_path, output_path)
-4. SE ERRO: read_file -> corrigir -> write_file -> compile_cpp (repita)
-5. run_executable(path, args)
-6. memory_save(key, value)
-7. Resposta final
+NUNCA:
+- Nao use create_project sozinho (use create_and_write)
+- Nao repita a mesma acao mais de 2 vezes
+- Nao use ``` no content do write_file
+- Nao tente read_file antes de saber que o arquivo existe (use list_project_files primeiro)
 
 FERRAMENTAS DISPONIVEIS:
-terminal, read_file, write_file, append_file, list_directory, file_info, delete_file
-memory_save, memory_load, memory_list, memory_delete
-compile_cpp, compile_java, run_executable, create_project
-git_status, git_commit, git_log, git_push, git_clone
-hexdump, analyze_binary, find_patterns, extract_strings, compare_files, entropy_analysis, parse_struct, search_signature"""
+- create_and_write: CRIA PROJETO + ARQUIVO (USE ESTA!)
+- compile_cpp: source_path, output_path
+- run_executable: path, args, timeout
+- write_file: path, content (para corrigir)
+- read_file: path
+- list_project_files: project_name (para ver arquivos)
+- list_directory: path
+- terminal: command
+- memory_save: key, value
+- memory_load, memory_list, memory_delete
+- git_status, git_commit, git_log, git_push, git_clone
+- hexdump, analyze_binary, find_patterns, extract_strings, compare_files, entropy_analysis, parse_struct, search_signature"""
 
 
 class Agent:
@@ -55,7 +58,7 @@ class Agent:
         self.llm = llm_provider
         self.tools = tools or {}
         self.sessions: Dict[str, Dict] = {}
-        self.max_iterations = 25
+        self.max_iterations = 20
 
     def create_session(self, project_id: str = None) -> str:
         session_id = str(uuid.uuid4())[:8]
@@ -65,8 +68,10 @@ class Agent:
             "messages": [{"role": "system", "content": SYSTEM_PROMPT}],
             "status": "active",
             "created_at": time.time(),
-            "last_tool": None,
-            "error_count": 0
+            "action_history": [],
+            "error_count": 0,
+            "consecutive_same_action": 0,
+            "last_action": None
         }
         print("[Agent] Sessao criada: " + session_id, flush=True)
         return session_id
@@ -76,16 +81,27 @@ class Agent:
             self.sessions[session_id]["status"] = "cancelled"
 
     def _parse_tool_call(self, text: str) -> Optional[Dict]:
-        pattern_inline = r'\[tool\]\s*(\{.*?\})\s*\[/tool\]'
-        match = re.search(pattern_inline, text, re.DOTALL)
+        # Formato correto
+        pattern1 = r'\[tool\]\s*(\{.*?\})\s*\[/tool\]'
+        match = re.search(pattern1, text, re.DOTALL)
         if match:
             try:
                 return json.loads(match.group(1))
             except json.JSONDecodeError:
                 pass
         
-        pattern_multiline = r'\[tool\]\s*\n(.*?)\n\s*\[/tool\]'
-        match = re.search(pattern_multiline, text, re.DOTALL)
+        # Formato quebrado (sem [ no fechamento)
+        pattern2 = r'\[tool\]\s*(\{.*?\})\s*/tool\]'
+        match = re.search(pattern2, text, re.DOTALL)
+        if match:
+            try:
+                return json.loads(match.group(1))
+            except json.JSONDecodeError:
+                pass
+        
+        # Multi-linha
+        pattern3 = r'\[tool\]\s*\n(.*?)\n\s*\[/tool\]'
+        match = re.search(pattern3, text, re.DOTALL)
         if match:
             try:
                 return json.loads(match.group(1))
@@ -116,23 +132,28 @@ class Agent:
                 result = self.tools[action](**args)
                 return str(result)
             except TypeError as e:
-                return f"Erro de parâmetro: {str(e)}. Parametros: {list(self.tools[action].__code__.co_varnames)}"
+                return f"Erro de parâmetro: {str(e)}. Parametros corretos: {list(self.tools[action].__code__.co_varnames)}"
             except Exception as e:
                 return "Erro: " + str(e)
         else:
-            return f"Ferramenta desconhecida: {action}. Disponíveis: {list(self.tools.keys())}"
+            return f"Ferramenta desconhecida: {action}. Disponiveis: {list(self.tools.keys())}"
 
-    def _get_next_required_tool(self, last_tool: str) -> str:
-        workflow = {
-            "create_project": "write_file",
-            "write_file": "compile_cpp",
-            "compile_cpp": "run_executable",
-            "compile_java": "run_executable",
-            "terminal": "run_executable",
-            "run_executable": "memory_save",
-            "memory_save": "DONE"
-        }
-        return workflow.get(last_tool, "DONE")
+    def _detect_loop(self, session: Dict, action: str, args: Dict) -> bool:
+        """Detecta se o agente está em loop"""
+        action_key = f"{action}:{json.dumps(args, sort_keys=True)}"
+        
+        # Verifica se é a mesma ação consecutiva
+        if session.get("last_action") == action_key:
+            session["consecutive_same_action"] = session.get("consecutive_same_action", 0) + 1
+        else:
+            session["consecutive_same_action"] = 0
+            session["last_action"] = action_key
+        
+        # Se repetiu 2x, é loop
+        if session["consecutive_same_action"] >= 2:
+            return True
+        
+        return False
 
     def run(self, session_id: str, user_message: str, event_callback: Callable = None) -> str:
         if session_id not in self.sessions:
@@ -174,7 +195,23 @@ class Agent:
                 tool_calls_count += 1
                 action = tool_call.get("action", "unknown")
                 args = tool_call.get("args", {})
-                session["last_tool"] = action
+                
+                # DETECÇÃO DE LOOP
+                if self._detect_loop(session, action, args):
+                    print(f"[Agent] LOOP DETECTADO em {action}", flush=True)
+                    
+                    # Forçar mudança de estratégia
+                    if action == "create_project":
+                        force_msg = "LOOP DETECTADO! Nao use create_project. USE create_and_write com name, language, filename e content."
+                    elif action == "read_file":
+                        force_msg = "LOOP DETECTADO! Use list_project_files para ver arquivos existentes, ou write_file para criar."
+                    else:
+                        force_msg = f"LOOP DETECTADO em {action}. Mude de estrategia. Proxima acao esperada: compile_cpp ou run_executable."
+                    
+                    session["messages"].append({"role": "user", "content": force_msg})
+                    session["consecutive_same_action"] = 0
+                    continue
+                
                 print(f"[Agent] Tool #{tool_calls_count}: {action}", flush=True)
                 
                 if event_callback:
@@ -190,42 +227,56 @@ class Agent:
                 if event_callback:
                     event_callback({"type": "tool_result", "tool": action, "result": result})
                 
-                if "Erro" in result or "erro" in result.lower():
+                # Detectar erro
+                if "Erro" in result or "erro" in result.lower() or "nao existe" in result.lower():
                     session["error_count"] = session.get("error_count", 0) + 1
-                    if session["error_count"] > 5:
+                    
+                    if session["error_count"] > 10:
                         final_response = f"Muitos erros ({session['error_count']}). Último: {result}"
                         break
                     
-                    session["messages"].append({
-                        "role": "user",
-                        "content": f"ERRO: {result}\n\nUse read_file para ver o código, corrija com write_file (SEM markdown fences), e recompile."
-                    })
-                else:
-                    session["error_count"] = 0
-                    next_tool = self._get_next_required_tool(action)
-                    if next_tool != "DONE":
+                    # Estratégia específica por tipo de erro
+                    if "ja existe" in result.lower() and action == "create_project":
                         session["messages"].append({
                             "role": "user",
-                            "content": f"Resultado: {result}\n\nPROXIMA ETAPA: {next_tool}. Execute agora."
+                            "content": f"ERRO: projeto ja existe. NAO repita create_project. USE create_and_write para criar o arquivo dentro do projeto existente, OU use list_project_files para ver o que tem."
+                        })
+                    elif "nao existe" in result.lower() and action == "read_file":
+                        session["messages"].append({
+                            "role": "user",
+                            "content": f"ERRO: arquivo nao existe. USE write_file para criar o arquivo, ou list_project_files para ver o que existe."
+                        })
+                    elif "parâmetro" in result.lower():
+                        session["messages"].append({
+                            "role": "user",
+                            "content": f"ERRO DE PARAMETRO: {result}\n\nVerifique os nomes corretos dos parametros."
                         })
                     else:
                         session["messages"].append({
                             "role": "user",
-                            "content": f"Resultado: {result}\n\nFluxo completo. Responda ao usuario."
+                            "content": f"ERRO: {result}\n\nTente estrategia diferente."
                         })
-            else:
-                last_tool = session.get("last_tool")
-                next_required = self._get_next_required_tool(last_tool) if last_tool else "write_file"
-                
-                if next_required == "DONE":
-                    final_response = response.strip()
                 else:
-                    force_msg = f"PAROU PREMATURAMENTE. Proxima etapa: {next_required}\nExecute [tool]{{\"action\": \"{next_required}\", ...}}[/tool] AGORA.\nLembre: NUNCA use ``` no content do write_file."
-                    session["messages"].append({"role": "user", "content": force_msg})
-                    print(f"[Agent] Forçando: {next_required}", flush=True)
-                    continue
-                
+                    session["error_count"] = 0
+                    
+                    # Guiar próximo passo
+                    if action == "create_and_write":
+                        next_msg = f"Resultado: {result}\n\nPROXIMO: compile_cpp com source_path='Drive/projects/{args.get('name', 'X')}/src/{args.get('filename', 'main.cpp')}' e output_path='Drive/projects/{args.get('name', 'X')}/app'"
+                    elif action == "compile_cpp":
+                        next_msg = f"Resultado: {result}\n\nPROXIMO: run_executable com path do executavel"
+                    elif action == "run_executable":
+                        next_msg = f"Resultado: {result}\n\nPROXIMO: memory_save para salvar progresso"
+                    elif action == "memory_save":
+                        next_msg = f"Resultado: {result}\n\nFluxo completo! Responda ao usuario com resumo."
+                    else:
+                        next_msg = f"Resultado: {result}\n\nContinue."
+                    
+                    session["messages"].append({"role": "user", "content": next_msg})
+            else:
+                # Sem tool call - resposta final
+                final_response = response.strip()
                 session["messages"].append({"role": "assistant", "content": final_response})
+                
                 if event_callback:
                     event_callback({"type": "agent_message", "content": final_response})
                 break
